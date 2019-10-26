@@ -19,7 +19,7 @@
     (cond
       (>= 0x39 n 0x30) (- n 0x30 #_0)
       (>= 0x46 n 0x41) (+ 10 (- n 0x41 #_A))
-      :else (.throw (Exception. (str "Can't convert '" c "' to number."))))))
+      :else (throw (Exception. (str "Can't convert '" c "' to number."))))))
 
 (defn compare-sprite
   "Compare if any bit existing in the old sprite has dissapeared from the new sprite."
@@ -395,4 +395,4 @@
            [\F  _ \3 \3] (call op-fx33 true  op1)
            [\F  _ \5 \5] (call op-fx55 true  op1)
            [\F  _ \6 \5] (call op-fx65 true  op1)
-           :else (.throw (Exception. (str "opcode '" op "' not found"))))))
+           :else (throw (Exception. (str "opcode '" op "' not found"))))))
