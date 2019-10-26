@@ -285,8 +285,10 @@
 
 (defn op-fx0a
   [sys x]
-  (prn "NOTICE THIS FUCKING BIG COMMENT")
-  sys)
+  (if (= (:key sys) nil)
+    sys
+    (-> (set-register sys x (get specs/keyboard-mapping (:key sys)))
+        inc-pc)))
 
 (defn op-fx15
   "LD DT, Vx - DT is set equal to the value of Vx."
@@ -387,7 +389,7 @@
            [\E  _ \9 \E] (call op-ex9e false op1)
            [\E  _ \A \1] (call op-exa1 false op1)
            [\F  _ \0 \7] (call op-fx07 true  op1)
-           [\F  _ \0 \A] (call op-fx0a true  op1)
+           [\F  _ \0 \A] (call op-fx0a false op1)
            [\F  _ \1 \5] (call op-fx15 true  op1)
            [\F  _ \1 \8] (call op-fx18 true  op1)
            [\F  _ \1 \E] (call op-fx1e true  op1)
