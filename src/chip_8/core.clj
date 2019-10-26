@@ -5,4 +5,7 @@
 (defn -main
   "Starts everything."
   [& args]
-  (gui/start))
+  (if (= 1 (count args))
+    (do (reset! gui/rom-file (first args))
+        (gui/start))
+    (.println *err* "usage: ./program <rom-file>")))

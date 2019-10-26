@@ -11,7 +11,7 @@ Also it's aimed to improve my clojure understanding through a kind of real proje
 * [ ] Implement sound
 * [ ] Fix collision bug, at the moment it doesn't work
 * [ ] Drastically improve execution speed, it's unplayable in this state :(
-* [ ] Remove the hardcoded ROM path and write it as a argument specified from terminal
+* [x] Remove the hardcoded ROM path and write it as a argument specified from terminal
 
 ##### main references:
 

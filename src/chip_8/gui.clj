@@ -8,12 +8,17 @@
 ;;; This namespace implements all the logic related with the ui, allowing
 ;;; for more flexibility in the future if implementing another one.
 
+;; I couldn't find a way to pass the file without using mutation,
+;; since setup can't accept parameters and it's the one that
+;; starts the system.
+(def rom-file (atom ""))
+
 (defn setup
   []
   (q/frame-rate 30)
   (q/no-stroke)
   (let [sys (specs/system)]
-    (assoc sys :mem (specs/load-rom (:mem sys) "/home/ghikio/src/chip-8/roms/INVADERS"))))
+    (assoc sys :mem (specs/load-rom (:mem sys) @rom-file))))
 
 (defn update-state
   [state]
