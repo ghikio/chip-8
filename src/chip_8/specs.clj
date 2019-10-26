@@ -1,4 +1,5 @@
-(ns chip-8.specs)
+(ns chip-8.specs
+  (:require [clojure.java.io :as io]))
 
 ;;; This namespace identifies and implements the specification of the chip-8
 ;;; language, aiming for a more robust interpreter.
@@ -98,3 +99,21 @@
    ;; Another element that isn't part of the specification, but allows to
    ;; keep track of when the screen should be redrawed.
    :draw-event false})
+
+(defn get-file-contents
+  "Read the contents of a file as a ByteArray."
+  [file]
+  (with-open [in  (io/input-stream file)
+              out (java.io.ByteArrayOutputStream.)]
+    (io/copy in out)
+    ;; convert from byte to int
+    (map #(bit-and % 0xFF) (.toByteArray out))))
+
+(defn load-rom
+  "Load the contents of the rom into memory."
+  [mem file]
+  (let [content   (vec (get-file-contents file))
+        final-pos (+ program-memory-pos (count content))]
+    (apply assoc mem
+           (interleave (range program-memory-pos final-pos)
+                       content))))

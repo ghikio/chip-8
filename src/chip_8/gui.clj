@@ -1,7 +1,7 @@
 (ns chip-8.gui
   (:require [chip-8.screen :as scr]
-            [chip-8.core :as core]
             [chip-8.specs :as specs]
+            [chip-8.instructions :as ins]
             [quil.core :as q]
             [quil.middleware :as qm]))
 
@@ -13,14 +13,14 @@
   (q/frame-rate 30)
   (q/no-stroke)
   (let [sys (specs/system)]
-    (assoc sys :mem (core/load-rom (:mem sys) "/home/ghikio/src/chip-8/roms/INVADERS"))))
+    (assoc sys :mem (specs/load-rom (:mem sys) "/home/ghikio/src/chip-8/roms/INVADERS"))))
 
 (defn update-state
   [state]
   (prn "dt: " (get-in state [:reg :dt]))
   (prn "st: " (get-in state [:reg :dt]))
   (prn "f:  " (get-in state [:reg :vf]))
-  (core/evaluate state))
+  (ins/evaluate state))
 
 (defn draw-state
   [state]
