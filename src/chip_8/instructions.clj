@@ -61,9 +61,9 @@
   "Return the instruction pointed by the program counter."
   [sys]
   (when (< (:pc sys) 4096)
-    (format "0x%02X%02X"
-            (nth (:mem sys) (:pc sys))
-            (nth (:mem sys) (+ 1 (:pc sys))))))
+    (read-string (format "0x%02X%02X"
+                         (nth (:mem sys) (:pc sys))
+                         (nth (:mem sys) (+ 1 (:pc sys)))))))
 
 (defn get-register
   [sys ^Character x]
@@ -347,51 +347,51 @@
   If `update-pc` is true, program counter is incremented."
   [sys f update-pc & args]
   (as-> (eval `(~f ~sys ~@args)) e
-    (if update-pc (inc-pc e) e)
-    (dec-timers e)))
+    (if update-pc (inc-pc e) e)))
 
 (defn evaluate
   "Evaluate an instruction."
   [sys]
-  (let [s               (assoc sys :draw-event false) ; dismiss old draw-event
-        op              (read-string (get-next-ins s))
-        op-match        (vec (format "%04X" op))
-        [_ op1 op2 op3] op-match
-        call            (partial call-ins s)]
-    (match op-match
-           [\0 \0 \E \0] (call op-00e0 true)
-           [\0 \0 \E \E] (call op-00ee false)
-           [\0  _  _  _] (inc-pc sys) ; does nothing
-           [\1  _  _  _] (call op-1nnn false (bit-and op 0xFFF))
-           [\2  _  _  _] (call op-2nnn false (bit-and op 0xFFF))
-           [\3  _  _  _] (call op-3xkk false op1 (bit-and op 0xFF))
-           [\4  _  _  _] (call op-4xkk false op1 (bit-and op 0xFF))
-           [\5  _  _ \0] (call op-5xy0 false op1 op2)
-           [\6  _  _  _] (call op-6xkk true  op1 (bit-and op 0xFF))
-           [\7  _  _  _] (call op-7xkk true  op1 (bit-and op 0xFF))
-           [\8  _  _ \0] (call op-8xy0 true  op1 op2)
-           [\8  _  _ \1] (call op-8xy1 true  op1 op2)
-           [\8  _  _ \2] (call op-8xy2 true  op1 op2)
-           [\8  _  _ \3] (call op-8xy3 true  op1 op2)
-           [\8  _  _ \4] (call op-8xy4 true  op1 op2)
-           [\8  _  _ \5] (call op-8xy5 true  op1 op2)
-           [\8  _  _ \6] (call op-8xy6 true  op1)
-           [\8  _  _ \7] (call op-8xy7 true  op1 op2)
-           [\8  _  _ \E] (call op-8xye true  op1)
-           [\9  _  _ \0] (call op-9xy0 false op1 op2)
-           [\A  _  _  _] (call op-annn true  (bit-and op 0xFFF))
-           [\B  _  _  _] (call op-bnnn false (bit-and op 0xFFF))
-           [\C  _  _  _] (call op-cxkk true  op1 (bit-and op 0xFF))
-           [\D  _  _  _] (call op-dxyn true  op1 op2 (bit-and op 0xF))
-           [\E  _ \9 \E] (call op-ex9e false op1)
-           [\E  _ \A \1] (call op-exa1 false op1)
-           [\F  _ \0 \7] (call op-fx07 true  op1)
-           [\F  _ \0 \A] (call op-fx0a false op1)
-           [\F  _ \1 \5] (call op-fx15 true  op1)
-           [\F  _ \1 \8] (call op-fx18 true  op1)
-           [\F  _ \1 \E] (call op-fx1e true  op1)
-           [\F  _ \2 \9] (call op-fx29 true  op1)
-           [\F  _ \3 \3] (call op-fx33 true  op1)
-           [\F  _ \5 \5] (call op-fx55 true  op1)
-           [\F  _ \6 \5] (call op-fx65 true  op1)
-           :else (throw (Exception. (str "opcode '" op "' not found"))))))
+  (as-> sys s
+    (assoc s :draw-event false)
+    (let [call (partial call-ins s)
+          op   (get-next-ins s)
+          [_ op1 op2 _ :as m] (vec (format "%04X" op))]
+      (match m
+             [\0 \0 \E \0] (call op-00e0 true)
+             [\0 \0 \E \E] (call op-00ee false)
+             [\0  _  _  _] (inc-pc s) ; does nothing
+             [\1  _  _  _] (call op-1nnn false (bit-and op 0xFFF))
+             [\2  _  _  _] (call op-2nnn false (bit-and op 0xFFF))
+             [\3  _  _  _] (call op-3xkk false op1 (bit-and op 0xFF))
+             [\4  _  _  _] (call op-4xkk false op1 (bit-and op 0xFF))
+             [\5  _  _ \0] (call op-5xy0 false op1 op2)
+             [\6  _  _  _] (call op-6xkk true  op1 (bit-and op 0xFF))
+             [\7  _  _  _] (call op-7xkk true  op1 (bit-and op 0xFF))
+             [\8  _  _ \0] (call op-8xy0 true  op1 op2)
+             [\8  _  _ \1] (call op-8xy1 true  op1 op2)
+             [\8  _  _ \2] (call op-8xy2 true  op1 op2)
+             [\8  _  _ \3] (call op-8xy3 true  op1 op2)
+             [\8  _  _ \4] (call op-8xy4 true  op1 op2)
+             [\8  _  _ \5] (call op-8xy5 true  op1 op2)
+             [\8  _  _ \6] (call op-8xy6 true  op1)
+             [\8  _  _ \7] (call op-8xy7 true  op1 op2)
+             [\8  _  _ \E] (call op-8xye true  op1)
+             [\9  _  _ \0] (call op-9xy0 false op1 op2)
+             [\A  _  _  _] (call op-annn true  (bit-and op 0xFFF))
+             [\B  _  _  _] (call op-bnnn false (bit-and op 0xFFF))
+             [\C  _  _  _] (call op-cxkk true  op1 (bit-and op 0xFF))
+             [\D  _  _  _] (call op-dxyn true  op1 op2 (bit-and op 0xF))
+             [\E  _ \9 \E] (call op-ex9e false op1)
+             [\E  _ \A \1] (call op-exa1 false op1)
+             [\F  _ \0 \7] (call op-fx07 true  op1)
+             [\F  _ \0 \A] (call op-fx0a false op1)
+             [\F  _ \1 \5] (call op-fx15 true  op1)
+             [\F  _ \1 \8] (call op-fx18 true  op1)
+             [\F  _ \1 \E] (call op-fx1e true  op1)
+             [\F  _ \2 \9] (call op-fx29 true  op1)
+             [\F  _ \3 \3] (call op-fx33 true  op1)
+             [\F  _ \5 \5] (call op-fx55 true  op1)
+             [\F  _ \6 \5] (call op-fx65 true  op1)
+             :else (throw (Exception. (str "opcode '" op "' not found")))))
+    (dec-timers s)))
