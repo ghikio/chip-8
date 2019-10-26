@@ -66,9 +66,6 @@
             (nth (:mem sys) (+ 1 (:pc sys))))))
 
 (defn get-register
-  "Get the content of the given register `x`.
-  Parameter `x` represent either a value from 0 to f for general-purpose
-  registers or i, d or s for the equivalent specific registers i, dt and st."
   [sys ^Character x]
   (get-in sys [:reg (keyword (str \v x))]))
 
@@ -77,9 +74,6 @@
 (defn get-i  [sys] (get-in sys [:reg :i]))
 
 (defn set-register
-  "Set the content of the given register `x`.
-  Parameter `x` represent either a value from 0 to f for general-purpose
-  registers or i, d or s for the equivalent specific registers i, dt and st."
   [sys ^Character x ^Integer value]
   (let [v (bit-and (unchecked-byte value) 0xFF)]
     (assoc-in sys [:reg (keyword (str \v x))] v)))
@@ -267,12 +261,14 @@
           (assoc s :draw-event true))))))
 
 (defn op-ex9e
+  "SKP Vx - Skip next instruction if key with the value of Vx is pressed."
   [sys x]
   (ignore-next-if sys =
                   (get-register sys x)
                   (get specs/keyboard-mapping (:key sys))))
 
 (defn op-exa1
+  "SKNP Vx - Skip next instruction if key with the value of Vx is not pressed."
   [sys x]
   (ignore-next-if sys not=
                   (get-register sys x)
@@ -284,6 +280,7 @@
   (set-register sys x (get-dt sys)))
 
 (defn op-fx0a
+  "LD Vx, K - Wait for a key press, store the value of the key in Vx."
   [sys x]
   (if (= (:key sys) nil)
     sys
