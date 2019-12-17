@@ -78,9 +78,9 @@
   (let [v (bit-and (unchecked-byte value) 0xFF)]
     (assoc-in sys [:reg (keyword (str \v x))] v)))
 
-(defn set-dt [sys ^Integer v] (assoc-in sys [:reg :dt] v))
-(defn set-st [sys ^Integer v] (assoc-in sys [:reg :st] v))
-(defn set-i  [sys ^Integer v] (assoc-in sys [:reg :i]  v))
+(defn set-dt [sys ^Integer v] (assoc-in sys [:reg :dt] (unchecked-byte v)))
+(defn set-st [sys ^Integer v] (assoc-in sys [:reg :st] (unchecked-byte v)))
+(defn set-i  [sys ^Integer v] (assoc-in sys [:reg :i]  (unchecked-short v)))
 
 (defn write-sprite
   "Write a sprite to the screen at pos, being a sprite a list of 8 bits."
@@ -118,9 +118,10 @@
   (let [next-pc (last (:stk sys))]
     (if (> (:sp sys) -1)
       (-> sys
-          (assoc  :pc  (+ 2 next-pc))
+          (assoc  :pc  next-pc)
           (update :stk pop)
-          (update :sp  dec))
+          (update :sp  dec)
+          inc-pc)
       (inc-pc sys)))) ;; if the stack is empty ignore instruction?
 
 (defn op-1nnn
