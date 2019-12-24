@@ -2,6 +2,7 @@
   (:require [chip-8.screen :as scr]
             [chip-8.specs :as specs]
             [clojure.pprint :as pp]
+            [clojure.string :as string]
             [clojure.core.match :refer [match]]))
 
 ;; Helpers
@@ -52,7 +53,7 @@
 
 (defn ignore-next-if
   "Ignore next instruction if f on x and y returns true"
-  [sys f ^Character x ^Character y]
+  [sys f x y]
   (if (f x y)
     (inc-pc sys 2)
     (inc-pc sys)))
@@ -67,7 +68,7 @@
 
 (defn get-register
   [sys ^Character x]
-  (get-in sys [:reg (keyword (str \v x))]))
+  (get-in sys [:reg (keyword (str \v (string/lower-case x)))]))
 
 (defn get-dt [sys] (get-in sys [:reg :dt]))
 (defn get-st [sys] (get-in sys [:reg :dt]))
@@ -76,7 +77,7 @@
 (defn set-register
   [sys ^Character x ^Integer value]
   (let [v (bit-and (unchecked-byte value) 0xFF)]
-    (assoc-in sys [:reg (keyword (str \v x))] v)))
+    (assoc-in sys [:reg (keyword (str \v (string/lower-case x)))] v)))
 
 (defn set-dt [sys ^Integer v] (assoc-in sys [:reg :dt] (unchecked-byte v)))
 (defn set-st [sys ^Integer v] (assoc-in sys [:reg :st] (unchecked-byte v)))
@@ -102,8 +103,8 @@
   (let [dt (get-dt sys)
         st (get-st sys)]
     (as-> sys s
-      (if-not (<= dt 0) (set-dt s (- dt 2)) (set-dt s 0))
-      (if-not (<= st 0) (set-st s (- st 2)) (set-dt s 0)))))
+      (if-not (<= dt 0) (set-dt s (- dt 4)) (set-dt s 0))
+      (if-not (<= st 0) (set-st s (- st 4)) (set-dt s 0)))))
 
 ;; Instructions implementation
 
@@ -312,7 +313,7 @@
 (defn op-fx33
   "LD B, Vx - Takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2."
   [sys x]
-  (let [i         (get-i sys)
+  (let [i         (int (get-i sys))
         vx        (get-register sys x)
         vx-digits [(quot vx 100) (quot (mod vx 100) 10) (mod vx 10)]]
     (-> sys
@@ -324,12 +325,13 @@
   "LD [I], Vx - Copies the values of registers V0 through Vx into memory, starting at the address in I."
   [sys x]
   (let [xnum   (hex-char->num x)
-        values (map #(get-register sys %) (range (inc xnum)))]
+        values (vec (map #(get-register sys %) (range (inc xnum))))]
     (loop [s sys
            k 0]
       (if (<= k xnum)
         (recur (assoc-in s [:mem (+ (get-i s) k)] (values k))
-               (inc k))))))
+               (inc k))
+        s))))
 
 (defn op-fx65
   "LD Vx, [I] - The interpreter reads values from memory starting at location I into registers V0 through Vx."
@@ -350,49 +352,54 @@
   (as-> (eval `(~f ~sys ~@args)) e
     (if update-pc (inc-pc e) e)))
 
-(defn evaluate
-  "Evaluate an instruction."
+(defn execute
+  "Execute a instruction."
   [sys]
-  (as-> sys s
-    (assoc s :draw-event false)
-    (let [call (partial call-ins s)
-          op   (get-next-ins s)
-          [_ op1 op2 _ :as m] (vec (format "%04X" op))]
-      (match m
-             [\0 \0 \E \0] (call op-00e0 true)
-             [\0 \0 \E \E] (call op-00ee false)
-             [\0  _  _  _] (inc-pc s) ; does nothing
-             [\1  _  _  _] (call op-1nnn false (bit-and op 0xFFF))
-             [\2  _  _  _] (call op-2nnn false (bit-and op 0xFFF))
-             [\3  _  _  _] (call op-3xkk false op1 (bit-and op 0xFF))
-             [\4  _  _  _] (call op-4xkk false op1 (bit-and op 0xFF))
-             [\5  _  _ \0] (call op-5xy0 false op1 op2)
-             [\6  _  _  _] (call op-6xkk true  op1 (bit-and op 0xFF))
-             [\7  _  _  _] (call op-7xkk true  op1 (bit-and op 0xFF))
-             [\8  _  _ \0] (call op-8xy0 true  op1 op2)
-             [\8  _  _ \1] (call op-8xy1 true  op1 op2)
-             [\8  _  _ \2] (call op-8xy2 true  op1 op2)
-             [\8  _  _ \3] (call op-8xy3 true  op1 op2)
-             [\8  _  _ \4] (call op-8xy4 true  op1 op2)
-             [\8  _  _ \5] (call op-8xy5 true  op1 op2)
-             [\8  _  _ \6] (call op-8xy6 true  op1)
-             [\8  _  _ \7] (call op-8xy7 true  op1 op2)
-             [\8  _  _ \E] (call op-8xye true  op1)
-             [\9  _  _ \0] (call op-9xy0 false op1 op2)
-             [\A  _  _  _] (call op-annn true  (bit-and op 0xFFF))
-             [\B  _  _  _] (call op-bnnn false (bit-and op 0xFFF))
-             [\C  _  _  _] (call op-cxkk true  op1 (bit-and op 0xFF))
-             [\D  _  _  _] (call op-dxyn true  op1 op2 (bit-and op 0xF))
-             [\E  _ \9 \E] (call op-ex9e false op1)
-             [\E  _ \A \1] (call op-exa1 false op1)
-             [\F  _ \0 \7] (call op-fx07 true  op1)
-             [\F  _ \0 \A] (call op-fx0a false op1)
-             [\F  _ \1 \5] (call op-fx15 true  op1)
-             [\F  _ \1 \8] (call op-fx18 true  op1)
-             [\F  _ \1 \E] (call op-fx1e true  op1)
-             [\F  _ \2 \9] (call op-fx29 true  op1)
-             [\F  _ \3 \3] (call op-fx33 true  op1)
-             [\F  _ \5 \5] (call op-fx55 true  op1)
-             [\F  _ \6 \5] (call op-fx65 true  op1)
-             :else (throw (Exception. (str "opcode '" op "' not found")))))
-    (dec-timers s)))
+  (let [call (partial call-ins sys)
+        op   (get-next-ins sys)
+        [_ op1 op2 _ :as m] (vec (format "%04X" op))]
+    (match m
+           [\0 \0 \E \0] (call op-00e0 true)
+           [\0 \0 \E \E] (call op-00ee false)
+           [\0  _  _  _] (inc-pc sys) ; does nothing
+           [\1  _  _  _] (call op-1nnn false (bit-and op 0xFFF))
+           [\2  _  _  _] (call op-2nnn false (bit-and op 0xFFF))
+           [\3  _  _  _] (call op-3xkk false op1 (bit-and op 0xFF))
+           [\4  _  _  _] (call op-4xkk false op1 (bit-and op 0xFF))
+           [\5  _  _ \0] (call op-5xy0 false op1 op2)
+           [\6  _  _  _] (call op-6xkk true  op1 (bit-and op 0xFF))
+           [\7  _  _  _] (call op-7xkk true  op1 (bit-and op 0xFF))
+           [\8  _  _ \0] (call op-8xy0 true  op1 op2)
+           [\8  _  _ \1] (call op-8xy1 true  op1 op2)
+           [\8  _  _ \2] (call op-8xy2 true  op1 op2)
+           [\8  _  _ \3] (call op-8xy3 true  op1 op2)
+           [\8  _  _ \4] (call op-8xy4 true  op1 op2)
+           [\8  _  _ \5] (call op-8xy5 true  op1 op2)
+           [\8  _  _ \6] (call op-8xy6 true  op1)
+           [\8  _  _ \7] (call op-8xy7 true  op1 op2)
+           [\8  _  _ \E] (call op-8xye true  op1)
+           [\9  _  _ \0] (call op-9xy0 false op1 op2)
+           [\A  _  _  _] (call op-annn true  (bit-and op 0xFFF))
+           [\B  _  _  _] (call op-bnnn false (bit-and op 0xFFF))
+           [\C  _  _  _] (call op-cxkk true  op1 (bit-and op 0xFF))
+           [\D  _  _  _] (call op-dxyn true  op1 op2 (bit-and op 0xF))
+           [\E  _ \9 \E] (call op-ex9e false op1)
+           [\E  _ \A \1] (call op-exa1 false op1)
+           [\F  _ \0 \7] (call op-fx07 true  op1)
+           [\F  _ \0 \A] (call op-fx0a false op1)
+           [\F  _ \1 \5] (call op-fx15 true  op1)
+           [\F  _ \1 \8] (call op-fx18 true  op1)
+           [\F  _ \1 \E] (call op-fx1e true  op1)
+           [\F  _ \2 \9] (call op-fx29 true  op1)
+           [\F  _ \3 \3] (call op-fx33 true  op1)
+           [\F  _ \5 \5] (call op-fx55 true  op1)
+           [\F  _ \6 \5] (call op-fx65 true  op1)
+           :else (throw (Exception. (str "opcode '" op "' not found"))))))
+
+(defn evaluate
+  "Evaluate a step."
+  [sys]
+  (-> sys
+      (assoc :draw-event false)
+      execute
+      dec-timers))
