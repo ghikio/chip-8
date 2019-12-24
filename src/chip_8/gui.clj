@@ -15,16 +15,13 @@
 
 (defn setup
   []
-  (q/frame-rate 30)
+  (q/frame-rate 60)
   (q/no-stroke)
   (let [sys (specs/system)]
     (assoc sys :mem (specs/load-rom (:mem sys) @rom-file))))
 
 (defn update-state
   [state]
-  (prn "dt: " (get-in state [:reg :dt]))
-  (prn "st: " (get-in state [:reg :dt]))
-  (prn "f:  " (get-in state [:reg :vf]))
   (ins/evaluate state))
 
 (defn draw-state

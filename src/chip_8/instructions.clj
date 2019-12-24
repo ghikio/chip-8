@@ -9,13 +9,13 @@
 
 (defn num->bin
   "Transforms a number `n` to it's binary form."
-  [^Integer n]
+  [n]
   (map (fn [^Character c] (Character/digit c 2)) (pp/cl-format nil "~8,'0',B" n)))
 
 (defn hex-char->num
   "Transforms a character `c` in hex form to an int.
   e.g. E --> 14"
-  [^Character c]
+  [c]
   (let [n (int c)]
     (cond
       (>= 0x39 n 0x30) (- n 0x30 #_0)
@@ -35,12 +35,12 @@
 
 (defn get-mem-sprite
   "Get a sprite from memory."
-  [sys ^Integer pos]
+  [sys pos]
   (num->bin (nth (:mem sys) pos)))
 
 (defn get-scr-sprite
   "Get a sprite from the screen."
-  [sys ^Integer pos]
+  [sys pos]
   (take 8 (drop pos (:scr sys))))
 
 (defn inc-pc
@@ -48,7 +48,7 @@
   If `num-ins` is supplied, increases it's value in instructions."
   ([sys]
    (inc-pc sys 1))
-  ([sys ^Integer num-ins]
+  ([sys num-ins]
    (update sys :pc + (* 2 num-ins))))
 
 (defn ignore-next-if
@@ -67,7 +67,7 @@
                          (nth (:mem sys) (+ 1 (:pc sys)))))))
 
 (defn get-register
-  [sys ^Character x]
+  [sys x]
   (get-in sys [:reg (keyword (str \v (string/lower-case x)))]))
 
 (defn get-dt [sys] (get-in sys [:reg :dt]))
@@ -75,23 +75,23 @@
 (defn get-i  [sys] (get-in sys [:reg :i]))
 
 (defn set-register
-  [sys ^Character x ^Integer value]
+  [sys x value]
   (let [v (bit-and (unchecked-byte value) 0xFF)]
     (assoc-in sys [:reg (keyword (str \v (string/lower-case x)))] v)))
 
-(defn set-dt [sys ^Integer v] (assoc-in sys [:reg :dt] (unchecked-byte v)))
-(defn set-st [sys ^Integer v] (assoc-in sys [:reg :st] (unchecked-byte v)))
-(defn set-i  [sys ^Integer v] (assoc-in sys [:reg :i]  (unchecked-short v)))
+(defn set-dt [sys v] (assoc-in sys [:reg :dt] (unchecked-byte v)))
+(defn set-st [sys v] (assoc-in sys [:reg :st] (unchecked-byte v)))
+(defn set-i  [sys v] (assoc-in sys [:reg :i]  (unchecked-short v)))
 
 (defn write-sprite
   "Write a sprite to the screen at pos, being a sprite a list of 8 bits."
-  [sys sprite ^Integer pos]
+  [sys sprite pos]
   (assoc sys :scr (apply assoc
                          (:scr sys)
                          (interleave (range pos (+ pos 8)) sprite))))
 
 (defn set-sprite
-  [sys old-sprite new-sprite ^Integer pos]
+  [sys old-sprite new-sprite pos]
   (let [xored-sprite (map bit-xor old-sprite new-sprite)
         s            (write-sprite sys xored-sprite pos)]
     (if-not (compare-sprite old-sprite xored-sprite)
