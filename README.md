@@ -9,7 +9,7 @@ Also it's aimed to improve my clojure understanding through a kind of real proje
 ##### v1.0.0 todo:
 
 * [ ] Implement sound
-* [ ] Fix collision bug, at the moment it doesn't work
+* [x] Fix collision bug
 * [ ] Drastically improve execution speed, it's unplayable in this state :(
 * [x] Remove the hardcoded ROM path and write it as a argument specified from terminal
 
