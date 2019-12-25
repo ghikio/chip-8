@@ -7,6 +7,6 @@
                  [org.clojure/clojure "1.10.0"]
                  [org.clojure/core.match "0.3.0"]]
   :jvm-opts ["-Xms4g" "-Xmx4g"]
-;;  :main chip-8.core
-  ;:aot :all
+  :profiles {:uberjar {:aot  [chip-8.core]
+                       :main  chip-8.core}}
   :repl-options {:init-ns chip-8.core})

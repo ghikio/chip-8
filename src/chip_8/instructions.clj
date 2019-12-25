@@ -7,7 +7,55 @@
 
 ;; Helpers
 
-(defn num->bin [n]
+;;this is a somewhat janky blend of vector semantics
+;;and clojure.core/take semantics from seqs, where
+;;we try to leverage subvecs to get a quick offset into
+;;the original vector, but we allow the amount "taken"
+;;or indexed by the subvector to be bounded by the
+;;actual length of the vector relative to "start".
+(defn take-vec [v start end]
+  (let [k (count v)]
+    (if (< start k)
+      (subvec v start (min end (dec (count v))))
+      [])))
+
+;;Faster variant of memoize for single-arg functions.
+;;Typically 4x faster in practice by avoiding RestFn
+;;invocation through naive memoize implement.  Threadsafe.
+(defn memo-1 [f]
+  (let [tbl (java.util.concurrent.ConcurrentHashMap.)]
+    (fn [k] (if-let [res (.get tbl k)]
+              res
+              (let [res (f k)]
+                (do (.putIfAbsent tbl k res)
+                    res))))))
+
+;;4x faster than clojure.core/memoize...
+;;we can do better with a macro, but I haven't sussed it out.
+;;This is a much as we probably need for now though, meh.
+(defn memo-2 [f]
+  (let [xs (java.util.concurrent.ConcurrentHashMap.)]
+    (fn [x y]
+      (if-let [^java.util.concurrent.ConcurrentHashMap ys (.get xs x)]
+        (if-let [res (.get ys y)]
+          res
+          (let [res (f x y)]
+            (do (.putIfAbsent ys y res)
+                  res)))
+        (let [res     (f x y)
+              ys    (doto (java.util.concurrent.ConcurrentHashMap.)
+                      (.putIfAbsent y res))
+              _     (.putIfAbsent xs x ys)]
+            res)))))
+
+#_(defn num->bin
+  "Transforms a number `n` to it's binary form."
+  [n]
+  (map (fn [^Character c] (Character/digit c 2))
+       (pp/cl-format nil "~8,'0',B" n)))
+
+;;About 46.45x faster than preceding implementation
+#_(defn num->bin [n]
   (let [s (java.lang.Integer/toBinaryString n)
         k (count s)]
     (into (if (< k 8)
@@ -15,10 +63,10 @@
             [])
           (map  (fn [^Character c] (Character/digit c 2)) s))))
 
+;;~2x faster than preceding implementation.
 (defn num->bin [n]
   (let [s (java.lang.Integer/toBinaryString n)
         k (count s)]
-
     (transduce (map  (fn [^Character c] (Character/digit c 2)))
                (completing (fn [acc v]
                              (conj acc v)))
@@ -27,15 +75,16 @@
                  [])
                s)))
 
-#_(alter-var-root #'num->bin memoize)
-
-;; (def nums (atom {}))
-;; (defn num->bin-old
-;;   "Transforms a number `n` to it's binary form."
-;;   [n]
-;;   (let [res (map (fn [^Character c] (Character/digit c 2)) (pp/cl-format nil "~8,'0',B" n))]
-;;     (swap!  nums assoc  n (vec res))
-;;     res))
+;;Performance note: we can get ~7x performance savings if we memoize...
+;;unsure of the size of memory used though...
+;;So this ends up at about 144x faster than the initial implementation.
+;;I'm "assuming" space isn't a concern....if it is, we can disable
+;;this line and still be at 50x improvement.  no idea what the
+;;domain of numbers being passed to num->bin is though....I "think"
+;;it's finite, based on memory, which is 4096 according to
+;;chip-8.specs/memory-size, so I think we're okay to use this
+;;optimization.
+(alter-var-root #'num->bin memoize)
 
 
 (defn hex-char->num
@@ -64,20 +113,17 @@
   [mem pos]
    (num->bin (nth mem pos)))
 
-(defn take-vec [v start end]
-  (let [k (count v)]
-    (if (< start k)
-      (subvec v start (min end (dec (count v))))
-      [])))
-
-;;this is linear in access, which is naive
-;;since we can subvec in O(1) time...
+;;Original implementation was linear in access
+;;due to drop/take despite using an indexed vector
+;;for scr.  We now just use a subvector to get
+;;O(1) indexed views.
 (defn get-scr-sprite
   "Get a sprite from the screen."
   [scr pos]
   (take-vec scr pos (+ pos 8))
-  #_(take 8 (drop pos scr)
-        ))
+  ;;original.
+  #_(take 8 (drop pos scr))
+  )
 
 (defn inc-pc
   "Increase the program counter.
@@ -94,14 +140,6 @@
     (inc-pc sys 2)
     (inc-pc sys)))
 
-(defn get-next-ins
-  "Return the instruction pointed by the program counter."
-  [sys]
-  (when (< (:pc sys) 4096)
-    (Long/decode (format "0x%02X%02X"
-                         (nth (:mem sys) (:pc sys))
-                         (nth (:mem sys) (+ 1 (:pc sys)))))))
-
 #_(defn get-next-ins
   "Return the instruction pointed by the program counter."
   [sys]
@@ -110,10 +148,79 @@
                          (nth (:mem sys) (:pc sys))
                          (nth (:mem sys) (+ 1 (:pc sys)))))))
 
-(defn get-register
+
+;;1.51x faster than preceding implementation.
+#_(defn get-next-ins
+  "Return the instruction pointed by the program counter."
+  [sys]
+  (when (< (:pc sys) 4096)
+    (let [m   (:mem sys)
+          pc  (:pc sys)]
+      (Long/decode (format "0x%02X%02X"
+                           (nth m pc)
+                           (nth m (unchecked-inc pc)))))))
+
+(defn instruction->long [i j]
+  (Long/decode (format "0x%02X%02X" i j)))
+(alter-var-root #'instruction->long memo-2)
+
+;;This is probably a memoization target, or at least
+;;the formatting bits...
+;;8x faster than preceding implementation,
+;;23.8x faster than original.
+(defn get-next-ins
+  "Return the instruction pointed by the program counter."
+  [sys]
+  (when (< (:pc sys) 4096)
+    (let [m   (:mem sys)
+          pc  (:pc sys)]
+      (instruction->long (nth m pc)
+                         (nth m (unchecked-inc pc))))))
+
+;;we can go faster if we memoize...maybe 2-3x...
+;;just use the immutable lookup for now.
+;;Original idea was to use a persistent map with lookup table,
+;;but I forgot to add in all the upper case stuff and had errors.
+;;This is still viable though, but memoization is actually simpler...
+#_(def char->reg
+  {\d :vd, \9 :v9, \3 :v3, \4 :v4, \f :vf, \8 :v8, \e :ve, \7 :v7,
+   \5 :v5, \a :va, \6 :v6, \b :vb, \1 :v1, \0 :v0, \2 :v2, \c :vc})
+
+;;just memoize the original function.  Gets us down to about 3x faster
+;;without having to change much.
+(defn char->reg [x]
+  (keyword (str \v (string/lower-case x))))
+
+;;this makes us about 42% faster than naive
+;;hashmap lookups if we use char->reg as a function.
+(alter-var-root #'char->reg memo-1)
+
+#_(defn get-register
   [sys x]
   (get-in sys [:reg (keyword (str \v (string/lower-case x)))]))
 
+;;faster get-register.
+;;"best" would be to use a record with fields or deftype.
+#_(defn get-register
+  [^clojure.lang.IPersistentMap sys x]
+  (let [^clojure.lang.IPersistentMap m (.valAt sys :reg)]
+    (.valAt m (or (char->reg x)
+                  (throw (ex-info "unknown register!" {:x x}))))))
+
+;;Don't see a huge improvement over clojure.core/get in this case...
+;;retain the idiomatic pathways.
+(defn get-register
+  [sys x]
+  (-> sys
+      :reg
+      (get (or (char->reg x)
+               (throw (ex-info "unknown register!" {:x x}))))))
+
+;;avoiding get-in, since it uses variadic args and invokes
+;;a RestFn.  We can get a similar effect with ->.
+;;There are macros to help with assoc-in and friends
+;;as well, where we know the "path" at compile time, and
+;;can write an optimal sequence of nested gets and assoc.
 (defn get-dt [sys] (-> sys :reg :dt))
 (defn get-st [sys] (-> sys :reg :dt))
 (defn get-i  [sys] (-> sys :reg :i))
@@ -122,11 +229,33 @@
 ;; (defn get-st [sys] (get-in sys [:reg :dt]))
 ;; (defn get-i  [sys] (get-in sys [:reg :i]))
 
-(defn set-register
+#_(defn set-register
   [sys x value]
   (let [v (bit-and (unchecked-byte value) 0xFF)]
     (assoc-in sys [:reg (keyword (str \v (string/lower-case x)))] v)))
 
+;;faster set-register...again, record would be useful here...
+;;approximately 2.12 x faster than original...
+#_(defn set-register
+  [sys x value]
+  (let [v (bit-and (unchecked-byte value) 0xFF)]
+    (assoc sys :reg (-> sys
+                        :reg
+                        (assoc (char->reg x) v)))))
+
+;;If we unpack assoc, we get more benefit...
+;;approximately 1.71x faster than initial hack,
+;;3.63x faster than original implementation.
+(defn set-register
+  [^clojure.lang.IPersistentMap sys x value]
+  (let [v (bit-and (unchecked-byte value) 0xFF)]
+    (.assoc sys :reg
+            (.assoc ^clojure.lang.Associative (.valAt sys :reg)
+                    (char->reg x)  v))))
+
+;;A lot of these could be made signficantly faster if we had
+;;these as fields in a "system" record.
+;;Not a major bottleneck though.
 (defn set-dt [sys v] (assoc-in sys [:reg :dt] (unchecked-byte v)))
 (defn set-st [sys v] (assoc-in sys [:reg :st] (unchecked-byte v)))
 (defn set-i  [sys v] (assoc-in sys [:reg :i]  (unchecked-short v)))
@@ -152,21 +281,24 @@
 ;;                    (:scr sys)
 ;;                    sprite))))
 
+;;Don't have hard benchmarks on hand, but this ended up being abit faster.
 (defn write-sprite
   ([sys sprite pos]
    (write-sprite sys (sys :scr) sprite pos 0 (min 8 (count sprite))))
-  ([sys ^clojure.lang.Associative scr ^clojure.lang.Indexed sprite pos n bound]
+  ([^clojure.lang.Associative sys
+    ^clojure.lang.Associative scr
+    ^clojure.lang.Indexed sprite pos n bound]
    (if (< n bound)
      (recur sys (.assoc scr pos (.nth sprite n))
             sprite
             (unchecked-inc pos)
             (unchecked-inc n)
             bound)
-     (assoc sys :scr scr))))
+     (.assoc sys :scr scr))))
 
 ;;we assoc every time we update a sprite...
 ;;updating a sprite is really updating n entries in a vector.
-;;This could be much much faster.
+;;This could be much much faster.  Don't like the mapv here....
 (defn set-sprite
   [sys old-sprite new-sprite pos]
   (let [xored-sprite (mapv bit-xor old-sprite new-sprite)
