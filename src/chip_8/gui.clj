@@ -23,8 +23,8 @@
                         (realized? out#)  :timeout
                         :else (do (Thread/sleep 1)
                                   (recur))))]
-     (do (when-not (realized? work#) (future-cancel work#))
-         (when-not (realized? timer#) (future-cancel timer#))
+     (do (future-cancel work#)
+         (future-cancel timer#)
          res#)))
 
 (defn setup
@@ -36,16 +36,18 @@
 
 (defn update-state
   [state]
-  (let [interim (atom state)
-        res     (until 16
-                       (loop [acc (ins/evaluate state)]
-                         (reset! interim acc)
-                         (if (:draw-event acc)
-                           acc
-                           (recur (ins/evaluate acc)))))]
-    (case res
-      :timeout @interim
-      res)))
+  (if-not (state :closed?)
+    (let [interim (atom state)
+          res     (until 16
+                         (loop [acc (ins/evaluate state)]
+                           (reset! interim acc)
+                           (if (:draw-event acc)
+                             acc
+                             (recur (ins/evaluate acc)))))]
+      (case res
+        :timeout @interim
+        res))
+    state))
 
 
 (defn draw-state
@@ -61,6 +63,7 @@
 (defn start
   []
   (q/defsketch app
+    :on-close     (fn [state] (assoc state :closed? true))
     :title        "chip 8"
     :size         [scr/scaled-width scr/scaled-height]
     :setup        setup
