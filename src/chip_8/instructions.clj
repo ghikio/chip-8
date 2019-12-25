@@ -7,10 +7,36 @@
 
 ;; Helpers
 
-(defn num->bin
-  "Transforms a number `n` to it's binary form."
-  [n]
-  (map (fn [^Character c] (Character/digit c 2)) (pp/cl-format nil "~8,'0',B" n)))
+(defn num->bin [n]
+  (let [s (java.lang.Integer/toBinaryString n)
+        k (count s)]
+    (into (if (< k 8)
+            (vec  (repeat (- 8 k) 0))
+            [])
+          (map  (fn [^Character c] (Character/digit c 2)) s))))
+
+(defn num->bin [n]
+  (let [s (java.lang.Integer/toBinaryString n)
+        k (count s)]
+
+    (transduce (map  (fn [^Character c] (Character/digit c 2)))
+               (completing (fn [acc v]
+                             (conj acc v)))
+               (if (< k 8)
+                 (vec  (repeat (- 8 k) 0))
+                 [])
+               s)))
+
+#_(alter-var-root #'num->bin memoize)
+
+;; (def nums (atom {}))
+;; (defn num->bin-old
+;;   "Transforms a number `n` to it's binary form."
+;;   [n]
+;;   (let [res (map (fn [^Character c] (Character/digit c 2)) (pp/cl-format nil "~8,'0',B" n))]
+;;     (swap!  nums assoc  n (vec res))
+;;     res))
+
 
 (defn hex-char->num
   "Transforms a character `c` in hex form to an int.
@@ -35,13 +61,23 @@
 
 (defn get-mem-sprite
   "Get a sprite from memory."
-  [sys pos]
-  (num->bin (nth (:mem sys) pos)))
+  [mem pos]
+   (num->bin (nth mem pos)))
 
+(defn take-vec [v start end]
+  (let [k (count v)]
+    (if (< start k)
+      (subvec v start (min end (dec (count v))))
+      [])))
+
+;;this is linear in access, which is naive
+;;since we can subvec in O(1) time...
 (defn get-scr-sprite
   "Get a sprite from the screen."
-  [sys pos]
-  (take 8 (drop pos (:scr sys))))
+  [scr pos]
+  (take-vec scr pos (+ pos 8))
+  #_(take 8 (drop pos scr)
+        ))
 
 (defn inc-pc
   "Increase the program counter.
@@ -62,6 +98,14 @@
   "Return the instruction pointed by the program counter."
   [sys]
   (when (< (:pc sys) 4096)
+    (Long/decode (format "0x%02X%02X"
+                         (nth (:mem sys) (:pc sys))
+                         (nth (:mem sys) (+ 1 (:pc sys)))))))
+
+#_(defn get-next-ins
+  "Return the instruction pointed by the program counter."
+  [sys]
+  (when (< (:pc sys) 4096)
     (read-string (format "0x%02X%02X"
                          (nth (:mem sys) (:pc sys))
                          (nth (:mem sys) (+ 1 (:pc sys)))))))
@@ -70,9 +114,13 @@
   [sys x]
   (get-in sys [:reg (keyword (str \v (string/lower-case x)))]))
 
-(defn get-dt [sys] (get-in sys [:reg :dt]))
-(defn get-st [sys] (get-in sys [:reg :dt]))
-(defn get-i  [sys] (get-in sys [:reg :i]))
+(defn get-dt [sys] (-> sys :reg :dt))
+(defn get-st [sys] (-> sys :reg :dt))
+(defn get-i  [sys] (-> sys :reg :i))
+
+;; (defn get-dt [sys] (get-in sys [:reg :dt]))
+;; (defn get-st [sys] (get-in sys [:reg :dt]))
+;; (defn get-i  [sys] (get-in sys [:reg :i]))
 
 (defn set-register
   [sys x value]
@@ -83,16 +131,45 @@
 (defn set-st [sys v] (assoc-in sys [:reg :st] (unchecked-byte v)))
 (defn set-i  [sys v] (assoc-in sys [:reg :i]  (unchecked-short v)))
 
-(defn write-sprite
+;;this is a janky way to update n entries in the screen vector.
+;;basically doing assocn.  A lot of extra work!
+;;Every time we write the sprite, we also assoc....
+#_(defn write-sprite
   "Write a sprite to the screen at pos, being a sprite a list of 8 bits."
   [sys sprite pos]
   (assoc sys :scr (apply assoc
                          (:scr sys)
                          (interleave (range pos (+ pos 8)) sprite))))
 
+;; (defn write-sprite
+;;   [sys sprite pos]
+;;   (let [idx (atom pos)]
+;;     (assoc sys :scr
+;;            (reduce (fn [^clojure.lang.Associative scr v]
+;;                      (let [n @idx
+;;                            _ (reset! idx (unchecked-inc n))]
+;;                        (.assoc scr n v)))
+;;                    (:scr sys)
+;;                    sprite))))
+
+(defn write-sprite
+  ([sys sprite pos]
+   (write-sprite sys (sys :scr) sprite pos 0 (min 8 (count sprite))))
+  ([sys ^clojure.lang.Associative scr ^clojure.lang.Indexed sprite pos n bound]
+   (if (< n bound)
+     (recur sys (.assoc scr pos (.nth sprite n))
+            sprite
+            (unchecked-inc pos)
+            (unchecked-inc n)
+            bound)
+     (assoc sys :scr scr))))
+
+;;we assoc every time we update a sprite...
+;;updating a sprite is really updating n entries in a vector.
+;;This could be much much faster.
 (defn set-sprite
   [sys old-sprite new-sprite pos]
-  (let [xored-sprite (map bit-xor old-sprite new-sprite)
+  (let [xored-sprite (mapv bit-xor old-sprite new-sprite)
         s            (write-sprite sys xored-sprite pos)]
     (if-not (compare-sprite old-sprite xored-sprite)
       (set-register s \f 1)
@@ -251,12 +328,15 @@
 (defn op-dxyn
   "DRW Vx, Vy, nibble - The interpreter reads n bytes from memory, starting at the address stored in I. These bytes are then displayed as sprites on screen at coordinates (Vx, Vy). Sprites are XORed onto the existing screen. If this causes any pixels to be erased, VF is set to 1, otherwise it is set to 0. If the sprite is positioned so part of it is outside the coordinates of the display, it wraps around to the opposite side of the screen."
   [sys x y n]
-  (let [pos (scr/get-pos (get-register sys x) (get-register sys y))]
+  (let [pos (scr/get-pos (get-register sys x) (get-register sys y))
+        mem (sys :mem)
+        scr (sys :scr)
+        I   (get-i sys)]
     (loop [s (set-register sys \f 0)
            i 0]
       (let [sprite-pos (+ pos (* i 64))
-            scr-sprite (get-scr-sprite sys sprite-pos)
-            new-sprite (get-mem-sprite sys (+ i (get-i sys)))]
+            scr-sprite (get-scr-sprite scr sprite-pos)
+            new-sprite (get-mem-sprite mem (+ i I))]
         (if (< i n)
           (recur (set-sprite s scr-sprite new-sprite sprite-pos)
                  (inc i))
@@ -345,55 +425,69 @@
                (inc k))
         s))))
 
-(defn call-ins
-  "Calls the instruction `f` with the given parameters `sys` and `args`.
-  If `update-pc` is true, program counter is incremented."
-  [sys f update-pc & args]
-  (as-> (eval `(~f ~sys ~@args)) e
-    (if update-pc (inc-pc e) e)))
+;; (defn call-ins
+;;   "Calls the instruction `f` with the given parameters `sys` and `args`.
+;;   If `update-pc` is true, program counter is incremented."
+;;   [sys f update-pc & args]
+;;   (as-> (eval `(~f ~sys ~@args)) e
+;;     (if update-pc (inc-pc e) e)))
+
+;; (defn call-ins
+;;   "Calls the instruction `f` with the given parameters `sys` and `args`.
+;;   If `update-pc` is true, program counter is incremented."
+;;   [sys f update-pc & args]
+;;   (as-> (apply f (cons sys args)) e
+;;     (if update-pc (inc-pc e) e)))
+
+(defmacro call-ins [sys f update-pc & args]
+  `(as-> (~f ~sys ~@args) e#
+     (if ~update-pc (inc-pc e#) e#)))
+
+(defmacro call [sys & args]
+  `(call-ins ~sys ~@args))
 
 (defn execute
   "Execute a instruction."
   [sys]
-  (let [call (partial call-ins sys)
+  (let [;call (partial call-ins sys)
         op   (get-next-ins sys)
         [_ op1 op2 _ :as m] (vec (format "%04X" op))]
     (match m
-           [\0 \0 \E \0] (call op-00e0 true)
-           [\0 \0 \E \E] (call op-00ee false)
+           [\0 \0 \E \0] (call sys op-00e0 true)
+           [\0 \0 \E \E] (call sys op-00ee false)
            [\0  _  _  _] (inc-pc sys) ; does nothing
-           [\1  _  _  _] (call op-1nnn false (bit-and op 0xFFF))
-           [\2  _  _  _] (call op-2nnn false (bit-and op 0xFFF))
-           [\3  _  _  _] (call op-3xkk false op1 (bit-and op 0xFF))
-           [\4  _  _  _] (call op-4xkk false op1 (bit-and op 0xFF))
-           [\5  _  _ \0] (call op-5xy0 false op1 op2)
-           [\6  _  _  _] (call op-6xkk true  op1 (bit-and op 0xFF))
-           [\7  _  _  _] (call op-7xkk true  op1 (bit-and op 0xFF))
-           [\8  _  _ \0] (call op-8xy0 true  op1 op2)
-           [\8  _  _ \1] (call op-8xy1 true  op1 op2)
-           [\8  _  _ \2] (call op-8xy2 true  op1 op2)
-           [\8  _  _ \3] (call op-8xy3 true  op1 op2)
-           [\8  _  _ \4] (call op-8xy4 true  op1 op2)
-           [\8  _  _ \5] (call op-8xy5 true  op1 op2)
-           [\8  _  _ \6] (call op-8xy6 true  op1)
-           [\8  _  _ \7] (call op-8xy7 true  op1 op2)
-           [\8  _  _ \E] (call op-8xye true  op1)
-           [\9  _  _ \0] (call op-9xy0 false op1 op2)
-           [\A  _  _  _] (call op-annn true  (bit-and op 0xFFF))
-           [\B  _  _  _] (call op-bnnn false (bit-and op 0xFFF))
-           [\C  _  _  _] (call op-cxkk true  op1 (bit-and op 0xFF))
-           [\D  _  _  _] (call op-dxyn true  op1 op2 (bit-and op 0xF))
-           [\E  _ \9 \E] (call op-ex9e false op1)
-           [\E  _ \A \1] (call op-exa1 false op1)
-           [\F  _ \0 \7] (call op-fx07 true  op1)
-           [\F  _ \0 \A] (call op-fx0a false op1)
-           [\F  _ \1 \5] (call op-fx15 true  op1)
-           [\F  _ \1 \8] (call op-fx18 true  op1)
-           [\F  _ \1 \E] (call op-fx1e true  op1)
-           [\F  _ \2 \9] (call op-fx29 true  op1)
-           [\F  _ \3 \3] (call op-fx33 true  op1)
-           [\F  _ \5 \5] (call op-fx55 true  op1)
-           [\F  _ \6 \5] (call op-fx65 true  op1)
+           [\1  _  _  _] (call sys op-1nnn false (bit-and op 0xFFF))
+           [\2  _  _  _] (call sys op-2nnn false (bit-and op 0xFFF))
+           [\3  _  _  _] (call sys op-3xkk false op1 (bit-and op 0xFF))
+           [\4  _  _  _] (call sys op-4xkk false op1 (bit-and op 0xFF))
+           [\5  _  _ \0] (call sys op-5xy0 false op1 op2)
+           [\6  _  _  _] (call sys op-6xkk true  op1 (bit-and op 0xFF))
+           [\7  _  _  _] (call sys op-7xkk true  op1 (bit-and op 0xFF))
+           [\8  _  _ \0] (call sys op-8xy0 true  op1 op2)
+           [\8  _  _ \1] (call sys op-8xy1 true  op1 op2)
+           [\8  _  _ \2] (call sys op-8xy2 true  op1 op2)
+           [\8  _  _ \3] (call sys op-8xy3 true  op1 op2)
+           [\8  _  _ \4] (call sys op-8xy4 true  op1 op2)
+           [\8  _  _ \5] (call sys op-8xy5 true  op1 op2)
+           [\8  _  _ \6] (call sys op-8xy6 true  op1)
+           [\8  _  _ \7] (call sys op-8xy7 true  op1 op2)
+           [\8  _  _ \E] (call sys op-8xye true  op1)
+           [\9  _  _ \0] (call sys op-9xy0 false op1 op2)
+           [\A  _  _  _] (call sys op-annn true  (bit-and op 0xFFF))
+           [\B  _  _  _] (call sys op-bnnn false (bit-and op 0xFFF))
+           [\C  _  _  _] (call sys op-cxkk true  op1 (bit-and op 0xFF))
+           [\D  _  _  _] (call sys op-dxyn true  op1 op2 (bit-and op 0xF))
+           [\E  _ \9 \E] (call sys op-ex9e false op1)
+           [\E  _ \A \1] (call sys op-exa1 false op1)
+           [\F  _ \0 \7] (call sys op-fx07 true  op1)
+           [\F  _ \0 \A] (call sys op-fx0a false op1)
+           [\F  _ \1 \5] (call sys op-fx15 true  op1)
+           [\F  _ \1 \8] (call sys op-fx18 true  op1)
+           [\F  _ \1 \E] (call sys op-fx1e true  op1)
+           [\F  _ \2 \9] (call sys op-fx29 true  op1)
+           [\F  _ \3 \3] (call sys op-fx33 true  op1)
+           [\F  _ \5 \5] (call sys op-fx55 true  op1)
+           [\F  _ \6 \5] (call sys op-fx65 true  op1)
            :else (throw (Exception. (str "opcode '" op "' not found"))))))
 
 (defn evaluate

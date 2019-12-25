@@ -13,6 +13,20 @@
 ;; starts the system.
 (def rom-file (atom ""))
 
+(defmacro until [timeout & body]
+  `(let [prom#  (promise)
+         out#   (promise)
+         work#  (future (deliver prom# ~@body))
+         timer# (future (do (Thread/sleep ~timeout) (deliver out#)))
+         res#   (loop []
+                  (cond (realized? prom#) (deref prom#)
+                        (realized? out#)  :timeout
+                        :else (do (Thread/sleep 1)
+                                  (recur))))]
+     (do (when-not (realized? work#) (future-cancel work#))
+         (when-not (realized? timer#) (future-cancel timer#))
+         res#)))
+
 (defn setup
   []
   (q/frame-rate 60)
@@ -22,7 +36,17 @@
 
 (defn update-state
   [state]
-  (ins/evaluate state))
+  (let [interim (atom state)
+        res     (until 16
+                       (loop [acc (ins/evaluate state)]
+                         (reset! interim acc)
+                         (if (:draw-event acc)
+                           acc
+                           (recur (ins/evaluate acc)))))]
+    (case res
+      :timeout @interim
+      res)))
+
 
 (defn draw-state
   [state]
