@@ -53,6 +53,10 @@
   "Sets the state of the screen at boot time."
   (vec (repeat (* screen-width screen-height) 0)))
 
+;;This could probably be overhauled into a record,
+;;with efficient direct field lookups for a lot of things
+;;that are currently being unpacked and repacked as maps.
+
 (defn system
   "Definition of the chip-8 machine with all of it's components."
   []

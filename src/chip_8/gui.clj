@@ -13,6 +13,20 @@
 ;; starts the system.
 (def rom-file (atom ""))
 
+(defmacro until [timeout & body]
+  `(let [prom#  (promise)
+         out#   (promise)
+         work#  (future (deliver prom# ~@body))
+         timer# (future (do (Thread/sleep ~timeout) (deliver out#)))
+         res#   (loop []
+                  (cond (realized? prom#) (deref prom#)
+                        (realized? out#)  :timeout
+                        :else (do (Thread/sleep 1)
+                                  (recur))))]
+     (do (future-cancel work#)
+         (future-cancel timer#)
+         res#)))
+
 (defn setup
   []
   (q/frame-rate 60)
@@ -22,7 +36,19 @@
 
 (defn update-state
   [state]
-  (ins/evaluate state))
+  (if-not (state :closed?)
+    (let [interim (atom state)
+          res     (until 16
+                         (loop [acc (ins/evaluate state)]
+                           (reset! interim acc)
+                           (if (:draw-event acc)
+                             acc
+                             (recur (ins/evaluate acc)))))]
+      (case res
+        :timeout @interim
+        res))
+    state))
+
 
 (defn draw-state
   [state]
@@ -37,6 +63,7 @@
 (defn start
   []
   (q/defsketch app
+    :on-close     (fn [state] (assoc state :closed? true))
     :title        "chip 8"
     :size         [scr/scaled-width scr/scaled-height]
     :setup        setup
