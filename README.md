@@ -10,7 +10,8 @@ Also it's aimed to improve my clojure understanding through a kind of real proje
 
 * [ ] Implement sound
 * [x] Fix collision bug
-* [ ] Drastically improve execution speed, it's unplayable in this state :(
+* [x] Drastically improve execution speed, it's unplayable in this state :(
+* [ ] Okay now it goes too fast, find a way to limit the FPS... someday
 * [x] Remove the hardcoded ROM path and write it as a argument specified from terminal
 
 ##### main references:
